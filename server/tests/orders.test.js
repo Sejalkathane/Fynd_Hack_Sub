@@ -136,3 +136,25 @@ test('validation: empty items and bad quantity give 400, nothing is created', as
   expect(await Order.countDocuments()).toBe(0);
   expect((await Product.findById(a._id)).stock).toBe(5);
 });
+
+test('search by reference and filter by status', async () => {
+  const a = await makeProduct('A', 10);
+  const first = await placeOrderVia(a._id, 1);
+  const second = await placeOrderVia(a._id, 1);
+  await setStatus(second.body.reference, 'PACKED');
+
+  // search (case-insensitive, partial)
+  const bySearch = await request(app).get(`/api/orders?search=${first.body.reference.toLowerCase()}`);
+  expect(bySearch.status).toBe(200);
+  expect(bySearch.body).toHaveLength(1);
+  expect(bySearch.body[0].reference).toBe(first.body.reference);
+
+  // filter by status
+  const packed = await request(app).get('/api/orders?status=PACKED');
+  expect(packed.body).toHaveLength(1);
+  expect(packed.body[0].reference).toBe(second.body.reference);
+
+  // unknown order gives 404
+  const missing = await request(app).get('/api/orders/ORD-9999');
+  expect(missing.status).toBe(404);
+});

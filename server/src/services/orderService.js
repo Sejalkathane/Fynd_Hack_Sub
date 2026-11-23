@@ -50,7 +50,7 @@ async function placeOrder(items) {
         const product = await Product.findOneAndUpdate(
           { _id: productId, stock: { $gte: quantity } },
           { $inc: { stock: -quantity } },
-          { new: true, session }
+          { returnDocument: 'after', session }
         );
 
         if (product) {
@@ -81,7 +81,7 @@ async function placeOrder(items) {
       const counter = await Counter.findOneAndUpdate(
         { _id: 'order' },
         { $inc: { seq: 1 } },
-        { upsert: true, new: true, session }
+        { upsert: true, returnDocument: 'after', session }
       );
       const reference = 'ORD-' + String(counter.seq).padStart(4, '0');
 
@@ -129,7 +129,7 @@ async function changeStatus(reference, nextStatus) {
       updated = await Order.findOneAndUpdate(
         { _id: order._id, status: order.status },
         { $set: { status: nextStatus }, $push: { history: { status: nextStatus } } },
-        { new: true, session }
+        { returnDocument: 'after', session }
       );
       if (!updated) {
         throw new AppError(409, 'INVALID_TRANSITION', 'Order was changed by someone else, please retry');
