@@ -1,8 +1,21 @@
 import { useEffect, useState } from 'react';
-import { getOrders } from '../api';
+import { getOrders, changeStatus } from '../api';
 import { formatMoney } from '../format';
 import StatusBadge from './StatusBadge';
-import { getOrders, changeStatus } from '../api';
+
+// Which buttons make sense for each status (the server still enforces the rules)
+const NEXT_ACTIONS = {
+  PLACED: [
+    { status: 'PACKED', label: 'Pack', style: 'bg-amber-500' },
+    { status: 'CANCELLED', label: 'Cancel order', style: 'bg-red-600' },
+  ],
+  PACKED: [
+    { status: 'SHIPPED', label: 'Ship', style: 'bg-green-600' },
+    { status: 'CANCELLED', label: 'Cancel order', style: 'bg-red-600' },
+  ],
+  SHIPPED: [],
+  CANCELLED: [],
+};
 
 export default function OrdersPanel({ refreshKey, onChanged }) {
   const [orders, setOrders] = useState([]);
@@ -11,6 +24,8 @@ export default function OrdersPanel({ refreshKey, onChanged }) {
   const [selectedRef, setSelectedRef] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [acting, setActing] = useState(false);
+  const [actionMsg, setActionMsg] = useState(null); // { type, text }
 
   // Re-fetch when search/filter changes (search waits 300ms after typing stops)
   // or when the parent says something changed (refreshKey)
@@ -31,40 +46,29 @@ export default function OrdersPanel({ refreshKey, onChanged }) {
 
   const selected = orders.find((o) => o.reference === selectedRef);
 
-
-  const NEXT_ACTIONS = {
-  PLACED: [
-    { status: 'PACKED', label: 'Pack', style: 'bg-amber-500' },
-    { status: 'CANCELLED', label: 'Cancel order', style: 'bg-red-600' },
-  ],
-  PACKED: [
-    { status: 'SHIPPED', label: 'Ship', style: 'bg-green-600' },
-    { status: 'CANCELLED', label: 'Cancel order', style: 'bg-red-600' },
-  ],
-  SHIPPED: [],
-  CANCELLED: [],
-};
-
-async function handleAction(order, next) {
-  if (acting) return;
-  if (next === 'CANCELLED' && !window.confirm(`Cancel ${order.reference}? Stock will be returned.`)) {
-    return;
+  async function handleAction(order, next) {
+    if (acting) return;
+    if (next === 'CANCELLED' && !window.confirm(`Cancel ${order.reference}? Stock will be returned.`)) {
+      return;
+    }
+    setActing(true);
+    setActionMsg(null);
+    try {
+      await changeStatus(order.reference, next);
+      setActionMsg({ type: 'success', text: `${order.reference} is now ${next}` });
+    } catch (e) {
+      setActionMsg({ type: 'error', text: e.message });
+    } finally {
+      // always re-fetch, so the screen matches the database
+      try {
+        setOrders(await getOrders(search.trim(), status));
+      } catch (e) {
+        setError(e.message);
+      }
+      onChanged && onChanged(); // refreshes product stock in App
+      setActing(false);
+    }
   }
-  setActing(true);
-  setActionMsg(null);
-  try {
-    await changeStatus(order.reference, next);
-    setActionMsg({ type: 'success', text: `${order.reference} is now ${next}` });
-  } catch (e) {
-    setActionMsg({ type: 'error', text: e.message });
-  } finally {
-    // always re-fetch, so the screen matches the database
-    setOrders(await getOrders(search.trim(), status));
-    onChanged && onChanged(); // refreshes product stock in App
-    setActing(false);
-  }
-}
-
 
   return (
     <div className="mt-8">
@@ -112,7 +116,10 @@ async function handleAction(order, next) {
                 {orders.map((o) => (
                   <tr
                     key={o._id}
-                    onClick={() => setSelectedRef(o.reference)}
+                    onClick={() => {
+                      setSelectedRef(o.reference);
+                      setActionMsg(null);
+                    }}
                     className={`cursor-pointer border-t hover:bg-gray-50 ${
                       o.reference === selectedRef ? 'bg-blue-50' : ''
                     }`}
@@ -152,34 +159,30 @@ async function handleAction(order, next) {
                 <span>{formatMoney(selected.totalCents)}</span>
               </div>
 
+              {actionMsg && (
+                <p
+                  className={`mt-3 text-sm ${
+                    actionMsg.type === 'success' ? 'text-green-700' : 'text-red-700'
+                  }`}
+                >
+                  {actionMsg.text}
+                </p>
+              )}
 
-
-
-
-
-{actionMsg && (
-  <p className={`mt-3 text-sm ${actionMsg.type === 'success' ? 'text-green-700' : 'text-red-700'}`}>
-    {actionMsg.text}
-  </p>
-)}
-
-{NEXT_ACTIONS[selected.status].length > 0 && (
-  <div className="flex gap-2 mt-4">
-    {NEXT_ACTIONS[selected.status].map((a) => (
-      <button
-        key={a.status}
-        onClick={() => handleAction(selected, a.status)}
-        disabled={acting}
-        className={`px-3 py-1.5 rounded text-white text-sm disabled:opacity-50 ${a.style}`}
-      >
-        {a.label}
-      </button>
-    ))}
-  </div>
-)}
-
-
-
+              {NEXT_ACTIONS[selected.status].length > 0 && (
+                <div className="flex gap-2 mt-4">
+                  {NEXT_ACTIONS[selected.status].map((a) => (
+                    <button
+                      key={a.status}
+                      onClick={() => handleAction(selected, a.status)}
+                      disabled={acting}
+                      className={`px-3 py-1.5 rounded text-white text-sm disabled:opacity-50 ${a.style}`}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div className="mt-4">
                 <p className="text-sm font-medium mb-1">Timeline</p>

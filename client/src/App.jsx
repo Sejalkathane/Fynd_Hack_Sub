@@ -4,7 +4,6 @@ import ProductList from './components/ProductList';
 import Cart from './components/Cart';
 import OrdersPanel from './components/OrdersPanel';
 
-
 export default function App() {
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState({}); // { productId: quantity }
@@ -105,10 +104,8 @@ export default function App() {
           submitting={submitting}
         />
       </div>
-      <OrdersPanel refreshKey={ordersVersion} />
+
+      <OrdersPanel refreshKey={ordersVersion} onChanged={loadProducts} />
     </div>
   );
 }
-
-
-<OrdersPanel refreshKey={ordersVersion} onChanged={loadProducts} />

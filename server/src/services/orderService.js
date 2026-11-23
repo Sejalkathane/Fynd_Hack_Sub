@@ -1,9 +1,10 @@
-const { AppError } = require('../utils/errors');
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
 const Order = require('../models/Order');
 const Counter = require('../models/Counter');
+const { AppError } = require('../utils/errors');
 
+// The whole status rulebook in one place
 const ALLOWED_MOVES = {
   PLACED: ['PACKED', 'CANCELLED'],
   PACKED: ['SHIPPED', 'CANCELLED'],
@@ -77,7 +78,7 @@ async function placeOrder(items) {
         throw new AppError(409, 'INSUFFICIENT_STOCK', 'Some items are unavailable', problems);
       }
 
-      // Make the next order number: ORD-0001, ORD-0002, ...
+      // Next order number: ORD-0001, ORD-0002, ...
       const counter = await Counter.findOneAndUpdate(
         { _id: 'order' },
         { $inc: { seq: 1 } },
@@ -99,7 +100,6 @@ async function placeOrder(items) {
     session.endSession();
   }
 }
-
 
 async function changeStatus(reference, nextStatus) {
   nextStatus = String(nextStatus || '').toUpperCase();
@@ -135,7 +135,7 @@ async function changeStatus(reference, nextStatus) {
         throw new AppError(409, 'INVALID_TRANSITION', 'Order was changed by someone else, please retry');
       }
 
-      // Give the stock back, only when cancelling
+      // Give the stock back, only when cancelling (same transaction)
       if (nextStatus === 'CANCELLED') {
         for (const item of order.items) {
           await Product.updateOne(
@@ -153,4 +153,4 @@ async function changeStatus(reference, nextStatus) {
   }
 }
 
-module.exports = { validateAndMergeItems , placeOrder ,changeStatus  };
+module.exports = { validateAndMergeItems, placeOrder, changeStatus };

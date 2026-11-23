@@ -13,7 +13,7 @@ function makeProduct(name, stock, priceCents = 100000) {
   return Product.create({ name, sku: name.toUpperCase(), priceCents, stock });
 }
 
-// Helper: place an order through the API and return the response
+// Helper: place an order through the API
 function placeOrderVia(productId, quantity) {
   return request(app)
     .post('/api/orders')
@@ -42,7 +42,6 @@ test('successful placement: 201, stock reduced, order stored', async () => {
   expect(await Order.countDocuments()).toBe(1);
 });
 
-
 test('insufficient stock: 409, no stock change, no order created', async () => {
   const a = await makeProduct('A', 5);
   const b = await makeProduct('B', 0);
@@ -66,18 +65,12 @@ test('insufficient stock: 409, no stock change, no order created', async () => {
   expect(await Order.countDocuments()).toBe(0);
 });
 
-
-
 test('invalid transition PLACED -> SHIPPED: 409, status unchanged', async () => {
   const a = await makeProduct('A', 5);
-  const placed = await request(app)
-    .post('/api/orders')
-    .send({ items: [{ productId: a._id.toString(), quantity: 1 }] });
+  const placed = await placeOrderVia(a._id, 1);
   const ref = placed.body.reference;
 
-  const res = await request(app)
-    .patch(`/api/orders/${ref}/status`)
-    .send({ status: 'SHIPPED' });
+  const res = await setStatus(ref, 'SHIPPED');
 
   expect(res.status).toBe(409);
   expect(res.body.error).toBe('INVALID_TRANSITION');
@@ -85,7 +78,6 @@ test('invalid transition PLACED -> SHIPPED: 409, status unchanged', async () => 
   const order = await Order.findOne({ reference: ref });
   expect(order.status).toBe('PLACED');
 });
-
 
 test('cancel restores stock exactly once', async () => {
   const a = await makeProduct('A', 5);
@@ -119,7 +111,6 @@ test('shipped order cannot be cancelled', async () => {
   expect(order.status).toBe('SHIPPED');
   expect((await Product.findById(a._id)).stock).toBe(4); // stock not given back
 });
-
 
 test('validation: empty items and bad quantity give 400, nothing is created', async () => {
   const a = await makeProduct('A', 5);
