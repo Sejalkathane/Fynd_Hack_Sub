@@ -13,6 +13,18 @@ function makeProduct(name, stock, priceCents = 100000) {
   return Product.create({ name, sku: name.toUpperCase(), priceCents, stock });
 }
 
+// Helper: place an order through the API and return the response
+function placeOrderVia(productId, quantity) {
+  return request(app)
+    .post('/api/orders')
+    .send({ items: [{ productId: productId.toString(), quantity }] });
+}
+
+// Helper: change an order's status through the API
+function setStatus(ref, status) {
+  return request(app).patch(`/api/orders/${ref}/status`).send({ status });
+}
+
 test('successful placement: 201, stock reduced, order stored', async () => {
   const a = await makeProduct('A', 5, 100000);
 
@@ -72,4 +84,55 @@ test('invalid transition PLACED -> SHIPPED: 409, status unchanged', async () => 
 
   const order = await Order.findOne({ reference: ref });
   expect(order.status).toBe('PLACED');
+});
+
+
+test('cancel restores stock exactly once', async () => {
+  const a = await makeProduct('A', 5);
+  const placed = await placeOrderVia(a._id, 2);
+  const ref = placed.body.reference;
+
+  expect((await Product.findById(a._id)).stock).toBe(3);
+
+  const first = await setStatus(ref, 'CANCELLED');
+  expect(first.status).toBe(200);
+  expect((await Product.findById(a._id)).stock).toBe(5);
+
+  // Repeat the cancel: must be rejected and must NOT add stock again
+  const second = await setStatus(ref, 'CANCELLED');
+  expect(second.status).toBe(409);
+  expect((await Product.findById(a._id)).stock).toBe(5);
+});
+
+test('shipped order cannot be cancelled', async () => {
+  const a = await makeProduct('A', 5);
+  const placed = await placeOrderVia(a._id, 1);
+  const ref = placed.body.reference;
+
+  await setStatus(ref, 'PACKED');
+  await setStatus(ref, 'SHIPPED');
+
+  const res = await setStatus(ref, 'CANCELLED');
+  expect(res.status).toBe(409);
+
+  const order = await Order.findOne({ reference: ref });
+  expect(order.status).toBe('SHIPPED');
+  expect((await Product.findById(a._id)).stock).toBe(4); // stock not given back
+});
+
+
+test('validation: empty items and bad quantity give 400, nothing is created', async () => {
+  const a = await makeProduct('A', 5);
+
+  const empty = await request(app).post('/api/orders').send({ items: [] });
+  expect(empty.status).toBe(400);
+
+  const zero = await placeOrderVia(a._id, 0);
+  expect(zero.status).toBe(400);
+
+  const decimal = await placeOrderVia(a._id, 1.5);
+  expect(decimal.status).toBe(400);
+
+  expect(await Order.countDocuments()).toBe(0);
+  expect((await Product.findById(a._id)).stock).toBe(5);
 });
