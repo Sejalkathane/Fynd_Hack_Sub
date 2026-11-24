@@ -1,6 +1,7 @@
-export function formatMoney(cents) {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-  }).format(cents / 100);
+
+export function formatMoney(amount) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+  }).format(amount / 100);
 }

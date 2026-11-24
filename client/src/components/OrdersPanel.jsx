@@ -1,90 +1,111 @@
-import { useEffect, useState } from 'react';
-import { getOrders, changeStatus } from '../api';
-import { formatMoney } from '../format';
-import StatusBadge from './StatusBadge';
 
-// Which buttons make sense for each status (the server still enforces the rules)
-const NEXT_ACTIONS = {
-  PLACED: [
-    { status: 'PACKED', label: 'Pack', style: 'bg-amber-500' },
-    { status: 'CANCELLED', label: 'Cancel order', style: 'bg-red-600' },
-  ],
-  PACKED: [
-    { status: 'SHIPPED', label: 'Ship', style: 'bg-green-600' },
-    { status: 'CANCELLED', label: 'Cancel order', style: 'bg-red-600' },
-  ],
-  SHIPPED: [],
-  CANCELLED: [],
-};
+import { useEffect, useState } from "react";
+import { getOrders, changeStatus } from "../api";
+import { formatMoney } from "../format";
+import StatusBadge from "./StatusBadge";
 
 export default function OrdersPanel({ refreshKey, onChanged }) {
   const [orders, setOrders] = useState([]);
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
   const [selectedRef, setSelectedRef] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [acting, setActing] = useState(false);
-  const [actionMsg, setActionMsg] = useState(null); // { type, text }
+  const [error, setError] = useState("");
 
-  // Re-fetch when search/filter changes (search waits 300ms after typing stops)
-  // or when the parent says something changed (refreshKey)
+  const selected = orders.find(
+    (order) => order.reference === selectedRef
+  );
+
+  // Fetch orders when search, filter or refreshKey changes
   useEffect(() => {
-    setLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        setOrders(await getOrders(search.trim(), status));
-        setError('');
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
+    const timer = setTimeout(() => {
+      loadOrders();
     }, 300);
+
     return () => clearTimeout(timer);
   }, [search, status, refreshKey]);
 
-  const selected = orders.find((o) => o.reference === selectedRef);
-
-  async function handleAction(order, next) {
-    if (acting) return;
-    if (next === 'CANCELLED' && !window.confirm(`Cancel ${order.reference}? Stock will be returned.`)) {
-      return;
-    }
-    setActing(true);
-    setActionMsg(null);
+  async function loadOrders() {
     try {
-      await changeStatus(order.reference, next);
-      setActionMsg({ type: 'success', text: `${order.reference} is now ${next}` });
-    } catch (e) {
-      setActionMsg({ type: 'error', text: e.message });
+      setLoading(true);
+      setError("");
+
+      const data = await getOrders(search.trim(), status);
+      setOrders(data);
+    } catch (err) {
+      setError(err.message);
     } finally {
-      // always re-fetch, so the screen matches the database
-      try {
-        setOrders(await getOrders(search.trim(), status));
-      } catch (e) {
-        setError(e.message);
-      }
-      onChanged && onChanged(); // refreshes product stock in App
+      setLoading(false);
+    }
+  }
+
+  function getActions(orderStatus) {
+    if (orderStatus === "PLACED") {
+      return ["PACKED", "CANCELLED"];
+    }
+
+    if (orderStatus === "PACKED") {
+      return ["SHIPPED", "CANCELLED"];
+    }
+
+    return [];
+  }
+
+  async function handleAction(newStatus) {
+    if (!selected || acting) return;
+
+    if (newStatus === "CANCELLED") {
+      const confirmed = window.confirm(
+        "Are you sure you want to cancel this order?"
+      );
+
+      if (!confirmed) return;
+    }
+
+    try {
+      setActing(true);
+      setError("");
+
+      await changeStatus(selected.reference, newStatus);
+
+      // Fetch updated order list and details
+      const data = await getOrders(search.trim(), status);
+      setOrders(data);
+
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
       setActing(false);
     }
   }
 
   return (
-    <div className="mt-8">
-      <h2 className="text-xl font-semibold mb-3">Orders</h2>
+    <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-5">
+        <h2 className="text-lg font-bold text-slate-900">
+          Order management
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Search, track and manage customer orders
+        </p>
+      </div>
 
-      <div className="flex gap-3 mb-3">
+      {/* Search and status filter */}
+      <div className="mb-5 grid gap-3 sm:grid-cols-2">
         <input
+          type="text"
+          placeholder="Search by order reference..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by reference, e.g. ORD-0001"
-          className="border rounded px-3 py-1.5 flex-1 bg-white"
+          className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
         />
+
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="border rounded px-3 py-1.5 bg-white"
+          className="rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
         >
           <option value="">All statuses</option>
           <option value="PLACED">Placed</option>
@@ -94,110 +115,164 @@ export default function OrdersPanel({ refreshKey, onChanged }) {
         </select>
       </div>
 
-      {error && <p className="text-red-600 mb-2">{error}</p>}
-
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* LIST */}
-        <div className="border rounded-lg bg-white overflow-hidden">
-          {loading ? (
-            <p className="p-4 text-gray-500">Loading orders...</p>
-          ) : orders.length === 0 ? (
-            <p className="p-4 text-gray-500">No orders found.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left">
-                <tr>
-                  <th className="p-2">Reference</th>
-                  <th className="p-2">Total</th>
-                  <th className="p-2">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((o) => (
-                  <tr
-                    key={o._id}
-                    onClick={() => {
-                      setSelectedRef(o.reference);
-                      setActionMsg(null);
-                    }}
-                    className={`cursor-pointer border-t hover:bg-gray-50 ${
-                      o.reference === selectedRef ? 'bg-blue-50' : ''
-                    }`}
-                  >
-                    <td className="p-2 font-medium">{o.reference}</td>
-                    <td className="p-2">{formatMoney(o.totalCents)}</td>
-                    <td className="p-2"><StatusBadge status={o.status} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+      {error && (
+        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+          {error}
         </div>
+      )}
 
-        {/* DETAIL */}
-        <div className="border rounded-lg bg-white p-4">
-          {!selected ? (
-            <p className="text-gray-500">Click an order to see its details.</p>
-          ) : (
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-lg">{selected.reference}</h3>
-                <StatusBadge status={selected.status} />
-              </div>
-
-              <ul className="text-sm space-y-1 mb-3">
-                {selected.items.map((i) => (
-                  <li key={i.productId} className="flex justify-between">
-                    <span>{i.name} x {i.quantity}</span>
-                    <span>{formatMoney(i.unitPriceCents * i.quantity)}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <div className="flex justify-between border-t pt-2 font-semibold">
-                <span>Total</span>
-                <span>{formatMoney(selected.totalCents)}</span>
-              </div>
-
-              {actionMsg && (
-                <p
-                  className={`mt-3 text-sm ${
-                    actionMsg.type === 'success' ? 'text-green-700' : 'text-red-700'
-                  }`}
-                >
-                  {actionMsg.text}
+      {loading ? (
+        <p className="py-8 text-center text-sm text-slate-500">
+          Loading orders...
+        </p>
+      ) : orders.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center">
+          <p className="font-medium text-slate-600">No orders found</p>
+          <p className="mt-1 text-sm text-slate-400">
+            Try another search or status filter
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {orders.map((order) => (
+            <button
+              key={order.reference}
+              onClick={() => setSelectedRef(order.reference)}
+              className={`flex w-full items-center justify-between gap-3 rounded-xl border p-4 text-left transition ${
+                selectedRef === order.reference
+                  ? "border-blue-400 bg-blue-50/50"
+                  : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+              }`}
+            >
+              <div>
+                <p className="font-semibold text-slate-800">
+                  {order.reference}
                 </p>
-              )}
-
-              {NEXT_ACTIONS[selected.status].length > 0 && (
-                <div className="flex gap-2 mt-4">
-                  {NEXT_ACTIONS[selected.status].map((a) => (
-                    <button
-                      key={a.status}
-                      onClick={() => handleAction(selected, a.status)}
-                      disabled={acting}
-                      className={`px-3 py-1.5 rounded text-white text-sm disabled:opacity-50 ${a.style}`}
-                    >
-                      {a.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div className="mt-4">
-                <p className="text-sm font-medium mb-1">Timeline</p>
-                <ul className="text-sm text-gray-600 space-y-0.5">
-                  {selected.history.map((h, idx) => (
-                    <li key={idx}>
-                      {h.status}: {new Date(h.at).toLocaleString()}
-                    </li>
-                  ))}
-                </ul>
+                <p className="mt-1 text-xs text-slate-500">
+                  {order.items.length} product lines
+                </p>
               </div>
-            </div>
-          )}
+
+              <div className="text-right">
+                <StatusBadge status={order.status} />
+                <p className="mt-2 text-sm font-semibold text-slate-800">
+                  {formatMoney(order.totalCents)}
+                </p>
+              </div>
+            </button>
+          ))}
         </div>
-      </div>
-    </div>
+      )}
+
+      {/* Selected order details */}
+      {selected && (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                Selected order
+              </p>
+              <h3 className="mt-1 text-lg font-bold text-slate-900">
+                {selected.reference}
+              </h3>
+            </div>
+
+            <button
+              onClick={() => setSelectedRef(null)}
+              className="text-sm font-medium text-slate-500 hover:text-slate-800"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="mt-3">
+            <StatusBadge status={selected.status} />
+          </div>
+
+          {/* Order items */}
+          <div className="my-5 space-y-3">
+            {selected.items.map((item, index) => (
+              <div
+                key={item.productId || index}
+                className="flex justify-between gap-3 text-sm"
+              >
+                <div>
+                  <p className="font-medium text-slate-700">
+                    {item.name}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {formatMoney(item.unitPriceCents)} × {item.quantity}
+                  </p>
+                </div>
+
+                <p className="font-semibold text-slate-800">
+                  {formatMoney(item.unitPriceCents * item.quantity)}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-between border-t border-slate-200 pt-4">
+            <span className="font-semibold text-slate-700">
+              Order total
+            </span>
+            <span className="text-lg font-bold text-slate-900">
+              {formatMoney(selected.totalCents)}
+            </span>
+          </div>
+
+          {/* Fulfilment actions */}
+          <div className="mt-5 flex flex-wrap gap-2">
+            {getActions(selected.status).map((action) => (
+              <button
+                key={action}
+                onClick={() => handleAction(action)}
+                disabled={acting}
+                className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-50 ${
+                  action === "CANCELLED"
+                    ? "bg-red-600 hover:bg-red-700"
+                    : "bg-blue-600 hover:bg-blue-700"
+                }`}
+              >
+                {acting
+                  ? "Please wait..."
+                  : action === "PACKED"
+                  ? "Mark as packed"
+                  : action === "SHIPPED"
+                  ? "Mark as shipped"
+                  : "Cancel order"}
+              </button>
+            ))}
+          </div>
+
+          {/* Order history */}
+          <div className="mt-6 border-t border-slate-200 pt-5">
+            <h4 className="mb-3 font-semibold text-slate-800">
+              Order timeline
+            </h4>
+
+            <div className="space-y-3">
+              {(selected.history || []).map((entry, index) => (
+                <div key={index} className="flex items-start gap-3">
+                  <span className="mt-1 h-2.5 w-2.5 rounded-full bg-blue-500" />
+
+                  <div>
+                    <p className="text-sm font-medium text-slate-700">
+                      {entry.status}
+                    </p>
+
+                    {entry.at && (
+                      <p className="text-xs text-slate-400">
+                        {new Date(entry.at).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
